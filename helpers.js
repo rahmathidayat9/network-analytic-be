@@ -22,6 +22,15 @@ const sendGetData = async (query) => {
     }
 }
 
+const convertBytesToKilobytes = async (value) => {
+    const originalString = value;
+    const floatValue = parseFloat(originalString);
+    const dividedValue = floatValue / 1000;
+    const resultString = dividedValue.toFixed(2);
+
+    return resultString
+}
+
 const calculateAverage = async (numbers) => {
     if (numbers.length === 0) {
         return 0;
@@ -102,5 +111,6 @@ module.exports = {
     toHour,
     calculateAverage,
     roundToNearest,
-    formatDateDifference
+    formatDateDifference,
+    convertBytesToKilobytes
 }

@@ -41,12 +41,26 @@ const getRateInData = async (socket) => {
         const kilobytesPerSecond = bytesPerSecond / 1024;
         const kilobytesPerSecondRounded = Math.round(kilobytesPerSecond * 100) / 100;
 
-        // console.log('rate : '+kilobytesPerSecondRoundedout);
-        // console.log('rate : '+kilobytesPerSecondRounded);
-
         socket.emit('rate_in_data', {
             upload: kilobytesPerSecondRoundedout,
             download: kilobytesPerSecondRounded
+        });
+    } catch (error) {
+        console.error('Error fetching data:', error);
+    }
+}
+
+const getRateSpeed = async (socket, interface) => {
+    try {
+        const rate_in_query = await helpers.sendGetData(`irate(ifHCInOctets{ifName=~'${interface}',instance='103.186.32.129'}[1m0s])*8`);
+        let rate_in_data = await helpers.convertBytesToKilobytes(rate_in_query.data.result[0].value[1])
+
+        const rate_out_query = await helpers.sendGetData(`irate(ifHCOutOctets{ifName=~'${interface}',instance='103.186.32.129'}[1m0s])*8`);
+        let rate_out_data = await helpers.convertBytesToKilobytes(rate_out_query.data.result[0].value[1])
+
+        socket.emit(interface, {
+            download: rate_in_data,
+            upload: rate_out_data
         });
     } catch (error) {
         console.error('Error fetching data:', error);
@@ -130,32 +144,6 @@ const wifiClientCount = async (socket) => {
     }
 };
 
-// const userData = async (socket) => {
-//     const client = mqtt.connect(brokerUrl, { clientId });
-//     client.on('connect', () => {
-//         console.log('Connected to the broker');
-//         client.subscribe(topic, (error) => {
-//             if (!error) {
-//                 console.log(`Subscribed to ${topic}`);
-//             }
-//         });
-//     });
-
-//     client.on('message', (receivedTopic, message) => {
-//         socket.emit('mqtt_data', JSON.parse(message.toString()));
-//         console.log(`Received message on topic ${receivedTopic}: ${message.toString()}`);
-//     });
-
-//     client.on('error', (error) => {
-//         console.error('Connection error:', error);
-//         client.end();
-//     });
-
-//     client.on('close', () => {
-//         console.log('Connection closed');
-//     });
-// }
-
 const storeUserToDatabase = async () => {
     database.query(`TRUNCATE TABLE users`);
 
@@ -180,8 +168,8 @@ module.exports = {
     ramLoad,
     systemDiskLoad,
     wifiClientCount,
-    // userData,
     getOutData,
     getRateInData,
+    getRateSpeed,
     storeUserToDatabase
 };

@@ -1,5 +1,6 @@
 const express = require('express');
 const helpers = require('../helpers');
+const database = require('../config/database.js');
 const router = express.Router();
 
 router.get('/', (req, res) => {
@@ -63,6 +64,48 @@ router.get('/api/dashboard/system-uptime', async (req, res) => {
         return res.status(500).json({ error: 'An error occurred' });
     }    
 });
+
+router.get('/api/dashboard/rate', async (req, res) => {
+    try {
+        const rate_in_query = await helpers.sendGetData("irate(ifHCInOctets{ifName=~'ether1',instance='103.186.32.129'}[1m0s])*8");
+        let rate_in_data = await helpers.convertBytesToKilobytes(rate_in_query.data.result[0].value[1])
+
+        const rate_out_query = await helpers.sendGetData("-irate(ifHCOutOctets{ifName=~'ether1',instance='103.186.32.129'}[1m0s])*8");
+        let rate_out_data = await helpers.convertBytesToKilobytes(rate_out_query.data.result[0].value[1])
+
+        return res.status(200).json({
+            message: 'Data retrieved',
+            data: {
+                in: rate_in_data,
+                out: rate_out_data
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ error: 'An error occurred' });
+    }
+})
+
+router.get('/api/dashboard/rate-speed', async (req, res) => {
+    try {
+        let interface = req.query.interface
+
+        const rate_in_query = await helpers.sendGetData(`irate(ifHCInOctets{ifName=~'${interface}',instance='103.186.32.129'}[1m0s])*8`);
+        let rate_in_data = await helpers.convertBytesToKilobytes(rate_in_query.data.result[0].value[1])
+
+        const rate_out_query = await helpers.sendGetData(`-irate(ifHCOutOctets{ifName=~'${interface}',instance='103.186.32.129'}[1m0s])*8`);
+        let rate_out_data = await helpers.convertBytesToKilobytes(rate_out_query.data.result[0].value[1])
+
+        return res.status(200).json({
+            message: 'Data retrieved',
+            data: {
+                in: rate_in_data,
+                out: rate_out_data
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({ error: 'An error occurred' });
+    }
+})
 
 router.get('/api/dashboard/rate-data', async (req, res) => {
     try {
@@ -194,6 +237,22 @@ router.get('/api/dashboard/get-data-ethernet', async (req, res) => {
                 download: inBondkilobytesPerSecondRounded,
                 upload: outBondkilobytesPerSecondRounded,
             }
+        }
+
+        return res.status(200).json(data);
+    } catch (error) {
+        return res.status(500).json({ error: 'An error occurred' });
+    }  
+});
+
+router.get('/api/analytic/daily-speed-rate', async (req, res) => {
+    try {
+        const daily_rate_in = await database.query('SELECT rate_in,date FROM analytics');
+        const daily_rate_out = await database.query('SELECT rate_out,date FROM analytics');
+
+        let data = {
+            upload: daily_rate_out.rows,
+            download: daily_rate_in.rows
         }
 
         return res.status(200).json(data);

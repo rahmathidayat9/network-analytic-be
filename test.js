@@ -1,101 +1,220 @@
-const mqtt = require('mqtt');
-const database = require('./config/database.js')
-const helpers = require('./helpers.js')
+const express = require('express')
+const http = require('http')
+const axios = require('axios')
+const app = express()
+const server = http.createServer(app)
+const database = require('./config/database')
+const apiUrl = 'https://api-mikrotik.linkdemo.web.id/api'
+const cron = require('node-cron')
+const { lastDayOfMonth } = require('date-fns')
+const lastDayOfTheMonth = lastDayOfMonth(new Date())
 
-/* HiveMq setup */
-const brokerUrl = 'mqtt://broker.hivemq.com:1883';
-const clientId = 'clientId-qj7stXp84Y';
-const topic = 'mikrotik/admin';
 
-const client = mqtt.connect(brokerUrl, { clientId });
+function getFormatedTime(format) {
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    const hours = String(now.getHours()).padStart(2, '0')
+    const minutes = String(now.getMinutes()).padStart(2, '0')
+    const seconds = String(now.getSeconds()).padStart(2, '0')
 
-client.on('connect', () => {
-    console.log('Connected to the broker');
-    client.subscribe(topic, (error) => {
-        if (!error) {
-            console.log(`Subscribed to ${topic}`);
-        }
-    });
-});
-
-client.on('message', async (receivedTopic, message) => {
-    console.log(`Received message on topic ${receivedTopic}: ${message.toString()}`);
-
-    try {
-        await database.query("TRUNCATE TABLE users")
-        let result = JSON.parse(message.toString())
-        
-        const timeString = result.lastseen;
-        const [minutesPart] = timeString.split('m');
-        const totalMinutes = parseInt(minutesPart, 10);
-        
-        const text = 'INSERT INTO users(hostname, ipaddress, lastseen, lastseen_minute) VALUES($1, $2,$3, $4) RETURNING *'
-        const values = [result.hostname, result.ipaddress, result.lastseen, totalMinutes];
-        const res = await database.query(text, values)
-        console.log(res.rows[0])
-
-        // result.forEach( async (value, index) => {
-        //     console.log(value.hostname);
-        //     const timeString = value.lastseen;
-        //     const [minutesPart] = timeString.split('m');
-        //     const totalMinutes = parseInt(minutesPart, 10);
-            
-        //     const text = 'INSERT INTO users(hostname, ipaddress, lastseen, lastseen_minute) VALUES($1, $2,$3, $4) RETURNING *'
-        //     const values = [value.hostname, value.ipaddress, value.lastseen, totalMinutes];
-        //     const res = await database.query(text, values)
-        //     console.log(res.rows[0])
-        // })
-    } catch (error) {
-        console.error('Error:', error);
+    if (format == 'datetime') {
+        format = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`    
     }
-});
 
-setInterval( async () => {
+    if (format == 'date') {
+        format = `${year}-${month}-${day}`
+    }
+
+    return format
+}
+
+async function interfaceList() {
     try {
-        /* get time now */
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = String(now.getMonth() + 1).padStart(2, '0'); // Month is zero-based, so add 1
-        const day = String(now.getDate()).padStart(2, '0');
-        const hours = String(now.getHours()).padStart(2, '0');
-        const minutes = String(now.getMinutes()).padStart(2, '0');
-        const seconds = String(now.getSeconds()).padStart(2, '0');
-        const dateNow = `${year}-${month}-${day}`;
-        const formattedDateTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+        const url = '/router/interface/list/print'
+        const params = {
+            "uuid" : "1"
+        }
 
-        const rate_in_query = await helpers.sendGetData(`irate(ifHCInOctets{ifName=~'ether1',instance='103.186.32.129'}[1m0s])*8`);
-        let rate_in_data = await helpers.convertBytesToKilobytes(rate_in_query.data.result[0].value[1])
+        const response = await axios.post(apiUrl+url, params)
+        const responseData = response.data.massage
 
-        const rate_out_query = await helpers.sendGetData(`irate(ifHCOutOctets{ifName=~'ether1',instance='103.186.32.129'}[1m0s])*8`);
-        let rate_out_data = await helpers.convertBytesToKilobytes(rate_out_query.data.result[0].value[1])
-        
-        /* check before input */
-        let getTodayData = await database.query(`SELECT * FROM analytics WHERE date = '${dateNow}'`);
-        
-        if (getTodayData.rows.length > 0) {
-            if (rate_in_data > getTodayData.rows[0].rate_in && rate_out_data > getTodayData.rows[0].rate_out) {
-                console.log('bigger data');
-                await database.query("TRUNCATE TABLE analytics")
+        let arrData = []
 
-                const text = 'INSERT INTO analytics(rate_in, rate_out, date, created_at) VALUES($1, $2,$3, $4) RETURNING *'
-                const values = [rate_in_data, rate_out_data, `${dateNow}`, formattedDateTime];
-                await database.query(text, values)   
-            }
-        } else {
-            const text = 'INSERT INTO analytics(rate_in, rate_out, date, created_at) VALUES($1, $2,$3, $4) RETURNING *'
-            const values = [rate_in_data, rate_out_data, `${dateNow}`, formattedDateTime];
+        responseData.forEach((value, index) => {
+            arrData.push(value.name)
+        })
+
+        return arrData
+    } catch (error) {
+        console.error('Error fetching data:', error)
+        return null
+    }
+}
+
+async function hitSocket() {
+    try {
+        const interfaces = await interfaceList()
+        const url = '/router/interface/list/monitor/live'
+        const params = {
+            "uuid" : "d50a736a-6814-4da8-9a2e-540f72506e31",
+            "ethernet" : interfaces
+        }
+
+        const response = await axios.post(apiUrl+url, params)
+
+        console.log(response.data)
+    } catch (error) {
+        console.error('Error fetching data:', error)
+        return null
+    }
+}
+
+async function getAverageData() {
+    try {
+        const now = new Date()
+        const currentHour = now.getHours()
+
+        const url = '/router/logs/print'
+        const params = {
+            "uuid" : "d50a736a-6814-4da8-9a2e-540f72506e31",
+            "date" : "2023-10-26",
+            "time" : currentHour,
+            "ethernet" : "ether1"
+        }
+
+        const response = await axios.post(apiUrl+url, params)
+
+        const jsonString = response.data
+
+        let newArray = jsonString.slice(1)
+        let pushArr = []
+
+        newArray.forEach((value, index) => {
+            pushArr.push(value[0])
+        })
+
+        const jsonData = pushArr
+        // Filter and map the 'rx-bits-per-second' values to integers
+        const rxBitsPerSecondValues = jsonData.map(item => parseInt(item['rx-bits-per-second']))
+        const txBitsPerSecondValues = jsonData.map(item => parseInt(item['tx-bits-per-second']))
+        // Calculate the average
+        const rxTotal = rxBitsPerSecondValues.reduce((acc, value) => acc + value, 0)
+        const txTotal = txBitsPerSecondValues.reduce((acc, value) => acc + value, 0)
+
+        const rxAvg = rxTotal / rxBitsPerSecondValues.length
+        const txAvg = txTotal / txBitsPerSecondValues.length
+
+        console.log(`Average 'rx-bits-per-second': ${rxAvg}`)
+        console.log(`Average 'tx-bits-per-second': ${txAvg} - `+currentHour)
+
+        let date = getFormatedTime('date')
+        let datetime = getFormatedTime('datetime')
+
+        const text = 'INSERT INTO analytics(rate_in, rate_out, date, created_at) VALUES($1, $2,$3, $4) RETURNING *'
+        const values = [txAvg, rxAvg, date, datetime]
+        await database.query(text, values)
+    } catch (error) {
+        console.error('Error fetching data:', error)
+        return null
+    } 
+}
+
+/* Membuat fungsi yang akan dijalankan setiap 10 detik */
+async function runTask() {
+    console.log('Tugas dijalankan setiap 10 detik')
+    let data = await database.query("SELECT * FROM analytics")
+    // let data = await database.query("TRUNCATE table analytics")
+    console.log(data.rows)
+}
+
+async function interfacesInsert() {
+    try {
+        const url = '/router/interface/list/print'
+        const params = {
+            "uuid" : "1"
+        }
+
+        const response = await axios.post(apiUrl+url, params)
+        const responseData = response.data.massage
+
+        let arrData = []
+        let date = getFormatedTime('date')
+        let datetime = getFormatedTime('datetime')
+
+        responseData.forEach((value, index) => {
+            let obj = value
+
+            arrData.push({
+                ethername: obj['name'],
+                rx_byte: obj['rx-byte'],
+                tx_byte: obj['tx-byte'],
+                date: date,
+                created_at: datetime
+            })
+        })
+
+        arrData.forEach( async (value, index) => {
+            const text = 'INSERT INTO interfaces(ethername, tx_byte, rx_byte, date, created_at) VALUES($1, $2,$3, $4, $5) RETURNING *'
+            const values = [value.ethername, value.rx_byte, value.tx_byte, value.date, value.created_at]
             await database.query(text, values)
-        }
+        })
+
+        console.log('Insert data successfully')
     } catch (error) {
-        console.error('Error fetching data:', error);
+        console.error('Error fetching data:', error)
+        return null
     }
-}, 5000)
+}
 
-client.on('error', (error) => {
-    console.error('Connection error:', error);
-    client.end();
-});
+function scheduleEveryMinutes() {
+    cron.schedule('* * * * *', () => {
+        console.log('Tugas dijalankan setiap menit')
+        setTimeout(scheduleEveryMinutes, 60000)
+    })
+}
 
-client.on('close', () => {
-    console.log('Connection closed');
-});
+function scheduleEveryHours() {
+    cron.schedule('0 * * * *', () => {
+        console.log('Tugas dijalankan setiap jam')
+        getAverageData()
+        setTimeout(scheduleEveryHours, 3600000)
+    })
+}
+
+/* Membuat fungsi yang akan mengatur ulang penjadwalan setiap 10 detik */
+function scheduleTask() {
+    cron.schedule('*/10 * * * * *', () => {
+        runTask()
+        hitSocket()
+        interfacesInsert()
+        // Penjadwalan ulang tugas setiap 10 detik
+        setTimeout(scheduleTask, 10000) // 10000 milidetik = 10 detik
+    })
+}
+
+// Schedule a task to run on the first date of every month
+cron.schedule('0 0 1 * *', () => {
+    console.log('Task scheduled on the first date of the month')
+    interfacesInsert()
+})
+
+// Define a cron job for the calculated last day of the month (at 00:00 AM).
+cron.schedule(`0 0 ${lastDayOfTheMonth.getDate()} * *`, () => {
+    console.log('Running a task on the last day of the month')
+    interfacesInsert()
+})
+
+// Memulai penjadwalan tugas
+scheduleTask()
+scheduleEveryMinutes()
+scheduleEveryHours()
+
+app.get('/', (req, res) => {
+    res.send('Running lifecycle of data insert')
+})
+
+server.listen(4000, () => {
+  console.log('Running lifecycle of data insert')
+})

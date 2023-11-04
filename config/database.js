@@ -1,4 +1,4 @@
-const { Client } = require('pg');
+const { Client } = require('pg')
  
 const client = new Client({
   user: 'analytic',
@@ -8,6 +8,6 @@ const client = new Client({
   port: 5432,
 })
 
-client.connect();
+client.connect()
 
 module.exports = client
